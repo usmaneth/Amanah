@@ -25,6 +25,38 @@ export function setupWallet(app: Express) {
     next();
   };
 
+  // Create new wallet
+  app.post("/api/wallets", requireAuth, async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).send("User session invalid");
+      }
+
+      const { name, type } = req.body;
+
+      if (!name || !type || !["daily", "family", "zakat"].includes(type)) {
+        return res.status(400).send("Invalid wallet configuration");
+      }
+
+      // Create new EVM wallet
+      const wallet = ethers.Wallet.createRandom();
+
+      // Save wallet to database
+      await db.insert(wallets).values({
+        userId: req.user.id,
+        name,
+        type,
+        address: wallet.address,
+        privateKey: wallet.privateKey,
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error creating wallet:", error);
+      res.status(500).send(error.message);
+    }
+  });
+
   // Get user's wallets
   app.get("/api/wallets", requireAuth, async (req, res) => {
     try {

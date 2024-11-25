@@ -13,6 +13,7 @@ export default function HomePage() {
   const { user, logout } = useUser();
   const { wallets, isLoading } = useWallet();
   const [activeTab, setActiveTab] = useState("accounts");
+  const [createWalletOpen, setCreateWalletOpen] = useState(false);
 
   const handleLogout = async () => {
     await logout();
@@ -42,10 +43,22 @@ export default function HomePage() {
           </TabsList>
 
           <TabsContent value="accounts" className="mt-6">
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {wallets?.map((wallet) => (
-                <AccountCard key={wallet.id} wallet={wallet} />
-              ))}
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-semibold">Your Wallets</h2>
+                <Button onClick={() => setCreateWalletOpen(true)}>
+                  Create New Wallet
+                </Button>
+              </div>
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {wallets?.map((wallet) => (
+                  <AccountCard key={wallet.id} wallet={wallet} />
+                ))}
+              </div>
+              <CreateWalletForm 
+                open={createWalletOpen} 
+                onOpenChange={setCreateWalletOpen} 
+              />
             </div>
           </TabsContent>
 

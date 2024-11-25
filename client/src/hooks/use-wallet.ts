@@ -79,11 +79,32 @@ export function useWallet() {
     },
   });
 
+  const createWalletMutation = useMutation<RequestResult, Error, { name: string; type: string; }>({
+    mutationFn: async (data) => {
+      const response = await fetch("/api/wallets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        return { ok: false, message: error };
+      }
+
+      return { ok: true };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wallets"] });
+    },
+  });
+
   return {
     wallets,
     transactions,
     isLoading,
     sendMoney: sendMoneyMutation.mutateAsync,
     payZakat: payZakatMutation.mutateAsync,
+    createWallet: createWalletMutation.mutateAsync,
   };
 }
