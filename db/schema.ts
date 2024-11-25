@@ -43,7 +43,9 @@ export type User = z.infer<typeof selectUserSchema>;
 export const insertWalletSchema = createInsertSchema(wallets);
 export const selectWalletSchema = createSelectSchema(wallets);
 export type InsertWallet = z.infer<typeof insertWalletSchema>;
-export type Wallet = z.infer<typeof selectWalletSchema>;
+export type Wallet = z.infer<typeof selectWalletSchema> & {
+  usdBalance?: string;
+};
 
 export const insertTransactionSchema = createInsertSchema(transactions);
 export const selectTransactionSchema = createSelectSchema(transactions);

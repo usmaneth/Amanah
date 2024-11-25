@@ -1,10 +1,26 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { wallets, transactions, users } from "@db/schema";
+import axios from 'axios';
 import { eq, and, or } from "drizzle-orm";
 import { ethers } from "ethers";
 import { WebSocket, WebSocketServer } from 'ws';
 
+// Price feed
+let avaxUsdPrice = 0;
+async function updateAvaxPrice() {
+  try {
+    const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=avalanche-2&vs_currencies=usd');
+    avaxUsdPrice = response.data['avalanche-2'].usd;
+  } catch (error) {
+    console.error('Failed to fetch AVAX price:', error);
+  }
+}
+
+// Update price every 5 minutes
+setInterval(updateAvaxPrice, 5 * 60 * 1000);
+// Initial price fetch
+updateAvaxPrice();
 const FUJI_RPC_URL = "https://api.avax-test.network/ext/bc/C/rpc";
 let provider: ethers.JsonRpcProvider;
 
@@ -169,7 +185,11 @@ export function setupWallet(app: Express) {
           .where(eq(wallets.id, wallet.id));
       }
 
-      res.json(userWallets);
+      const walletsWithUsd = userWallets.map(wallet => ({
+        ...wallet,
+        usdBalance: (Number(wallet.balance) * avaxUsdPrice).toString()
+      }));
+      res.json(walletsWithUsd);
     } catch (error: any) {
       res.status(500).send(error.message);
     }

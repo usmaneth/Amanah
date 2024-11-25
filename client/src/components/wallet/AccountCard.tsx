@@ -47,9 +47,14 @@ export default function AccountCard({ wallet }: AccountCardProps) {
           </div>
           <div>
             <span className="text-lg font-medium block">{wallet.name}</span>
-            <span className="text-sm text-muted-foreground">
-              {formatCurrency(Number(wallet.balance))} AVAX
-            </span>
+            <div className="space-y-1">
+              <span className="text-sm text-muted-foreground block">
+                {formatCurrency(Number(wallet.balance), 'AVAX')}
+              </span>
+              <span className="text-xs text-muted-foreground block">
+                ≈ {formatCurrency(Number(wallet.usdBalance || '0'))}
+              </span>
+            </div>
           </div>
         </CardTitle>
       </CardHeader>
