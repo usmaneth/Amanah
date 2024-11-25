@@ -7,7 +7,8 @@ import { useWallet } from "@/hooks/use-wallet";
 import { formatCurrency } from "@/lib/utils";
 import { type Wallet } from "@db/schema";
 import SendMoneyForm from "@/components/wallet/SendMoneyForm";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 
 export default function AccountPage() {
   const [, setLocation] = useLocation();
