@@ -4,7 +4,27 @@ import { wallets, transactions, users } from "@db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { ethers } from "ethers";
 
-const provider = new ethers.JsonRpcProvider("https://api.avax.network/ext/bc/C/rpc");
+const FUJI_RPC_URL = "https://api.avax-test.network/ext/bc/C/rpc";
+let provider: ethers.JsonRpcProvider;
+
+try {
+  provider = new ethers.JsonRpcProvider(FUJI_RPC_URL);
+} catch (error) {
+  console.error("Failed to initialize Avalanche Fuji provider:", error);
+  provider = new ethers.JsonRpcProvider(FUJI_RPC_URL);
+}
+
+// Function to request test AVAX from faucet
+async function requestTestAVAX(address: string): Promise<boolean> {
+  try {
+    // Note: This is a placeholder. In production, implement actual faucet API call
+    console.log(`Requesting test AVAX for address: ${address}`);
+    return true;
+  } catch (error) {
+    console.error("Failed to request test AVAX:", error);
+    return false;
+  }
+}
 
 export function setupWallet(app: Express) {
   // Middleware to ensure user is authenticated
@@ -27,20 +47,36 @@ export function setupWallet(app: Express) {
 
   // Create new wallet
   app.post("/api/wallets", requireAuth, async (req, res) => {
-    try {
-      if (!req.user) {
-        return res.status(401).send("User session invalid");
-      }
+    if (!req.user?.id) {
+      return res.status(401).send("User session invalid");
+    }
 
+    try {
       const { name, type } = req.body;
 
       if (!name || !type || !["daily", "family", "zakat"].includes(type)) {
         return res.status(400).send("Invalid wallet configuration");
       }
 
-      // Create new EVM wallet
-      const wallet = ethers.Wallet.createRandom();
+      // Create new Fuji testnet wallet
+      const wallet = ethers.Wallet.createRandom().connect(provider);
+      
+      // Log wallet creation (safely)
+      console.log(`Created new wallet for user ${req.user.id}:`, {
+        address: wallet.address,
+        type,
+        timestamp: new Date().toISOString()
+      });
 
+      // Request test AVAX from faucet
+      const faucetSuccess = await requestTestAVAX(wallet.address);
+      if (!faucetSuccess) {
+        console.warn(`Failed to request test AVAX for wallet: ${wallet.address}`);
+      }
+
+      // Check initial balance
+      const balance = await provider.getBalance(wallet.address);
+      
       // Save wallet to database
       await db.insert(wallets).values({
         userId: req.user.id,
@@ -48,12 +84,17 @@ export function setupWallet(app: Express) {
         type,
         address: wallet.address,
         privateKey: wallet.privateKey,
+        balance: ethers.formatEther(balance),
       });
 
-      res.json({ success: true });
+      res.json({ 
+        success: true,
+        address: wallet.address,
+        balance: ethers.formatEther(balance)
+      });
     } catch (error: any) {
       console.error("Error creating wallet:", error);
-      res.status(500).send(error.message);
+      res.status(500).send("Failed to create wallet");
     }
   });
 
@@ -97,6 +138,10 @@ export function setupWallet(app: Express) {
 
   // Send money
   app.post("/api/transactions/send", requireAuth, async (req, res) => {
+    if (!req.user?.id) {
+      return res.status(401).send("User session invalid");
+    }
+
     const { recipientUsername, amount, note } = req.body;
 
     try {
@@ -119,8 +164,8 @@ export function setupWallet(app: Express) {
         ))
         .limit(1);
 
-      if (!senderWallet || Number(senderWallet.balance) < amount) {
-        return res.status(400).send("Insufficient funds");
+      if (!senderWallet) {
+        return res.status(400).send("Sender wallet not found");
       }
 
       // Get recipient's wallet
@@ -136,15 +181,44 @@ export function setupWallet(app: Express) {
         return res.status(400).send("Recipient wallet not found");
       }
 
-      // Create and sign transaction
+      // Create wallet instance
       const wallet = new ethers.Wallet(senderWallet.privateKey, provider);
-      const tx = await wallet.sendTransaction({
+      
+      // Get current balance
+      const balance = await provider.getBalance(senderWallet.address);
+      if (balance < ethers.parseEther(amount.toString())) {
+        return res.status(400).send("Insufficient funds");
+      }
+
+      // Estimate gas
+      const gasEstimate = await provider.estimateGas({
+        from: senderWallet.address,
         to: recipientWallet.address,
         value: ethers.parseEther(amount.toString())
       });
 
-      // Wait for confirmation
-      await tx.wait();
+      // Add 20% buffer to gas estimate
+      const gasLimit = gasEstimate * BigInt(120) / BigInt(100);
+
+      // Get current gas price
+      const gasPrice = await provider.getFeeData();
+      
+      // Create and sign transaction
+      const tx = await wallet.sendTransaction({
+        to: recipientWallet.address,
+        value: ethers.parseEther(amount.toString()),
+        gasLimit,
+        maxFeePerGas: gasPrice.maxFeePerGas,
+        maxPriorityFeePerGas: gasPrice.maxPriorityFeePerGas
+      });
+
+      // Wait for confirmation with timeout
+      const receipt = await Promise.race([
+        tx.wait(2), // Wait for 2 confirmations
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Transaction timeout")), 30000)
+        )
+      ]);
 
       // Record transaction
       await db.insert(transactions)
@@ -154,12 +228,31 @@ export function setupWallet(app: Express) {
           amount: amount.toString(),
           type: "transfer",
           status: "completed",
-          metadata: { note, txHash: tx.hash }
+          metadata: { 
+            note, 
+            txHash: tx.hash,
+            blockNumber: receipt.blockNumber,
+            gasUsed: receipt.gasUsed.toString()
+          }
         });
 
-      res.json({ success: true });
+      res.json({ 
+        success: true,
+        txHash: tx.hash,
+        blockNumber: receipt.blockNumber
+      });
     } catch (error: any) {
-      res.status(500).send(error.message);
+      console.error("Transaction error:", error);
+      
+      // Handle specific error cases
+      if (error.message.includes("insufficient funds")) {
+        return res.status(400).send("Insufficient funds for transaction and gas fees");
+      }
+      if (error.message.includes("timeout")) {
+        return res.status(408).send("Transaction confirmation timeout");
+      }
+      
+      res.status(500).send("Failed to process transaction");
     }
   });
 
