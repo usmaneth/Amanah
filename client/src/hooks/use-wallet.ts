@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Wallet, Transaction } from "@db/schema";
+import ReconnectingWebSocket from "reconnecting-websocket";
+import { useEffect } from "react";
 
 interface SendMoneyParams {
   walletId: number;
@@ -30,8 +32,39 @@ interface RequestResult {
   };
 }
 
+let webSocket: ReconnectingWebSocket | null = null;
+
 export function useWallet() {
   const queryClient = useQueryClient();
+
+  // Setup WebSocket connection
+  useEffect(() => {
+    if (!webSocket) {
+      webSocket = new ReconnectingWebSocket(`ws://${window.location.host}/ws`);
+      
+      webSocket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'BALANCE_UPDATE') {
+          queryClient.setQueryData(['wallets'], (oldData: Wallet[] | undefined) => {
+            if (!oldData) return oldData;
+            return oldData.map(wallet => 
+              wallet.id === data.walletId 
+                ? { ...wallet, balance: data.balance }
+                : wallet
+            );
+          });
+        }
+      };
+    }
+
+    return () => {
+      if (webSocket) {
+        webSocket.close();
+        webSocket = null;
+      }
+    };
+  }, [queryClient]);
 
   const { data: wallets, isLoading } = useQuery<Wallet[]>({
     queryKey: ["wallets"],
