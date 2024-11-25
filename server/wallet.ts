@@ -158,7 +158,7 @@ export function setupWallet(app: Express) {
   const requireAuth = (
     req: Express.Request,
     res: Express.Response,
-    next: Express.NextFunction
+    next: (err?: any) => void
   ) => {
     if (!isAuthenticated(req)) {
       return res.status(401).send("Not authenticated");
@@ -172,34 +172,52 @@ export function setupWallet(app: Express) {
       const allWallets = await db.select().from(wallets);
       
       for (const wallet of allWallets) {
-        const balance = await provider.getBalance(wallet.address);
-        const formattedBalance = ethers.formatEther(balance);
-        
-        // Update database if balance changed
-        if (formattedBalance !== wallet.balance) {
-          await db
-            .update(wallets)
-            .set({ balance: formattedBalance })
-            .where(eq(wallets.id, wallet.id));
+        try {
+          const balance = await provider.getBalance(wallet.address);
+          const formattedBalance = ethers.formatEther(balance);
+          
+          // Update database if balance changed
+          if (formattedBalance !== wallet.balance) {
+            console.log(`Balance changed for wallet ${wallet.address}:`, {
+              oldBalance: wallet.balance,
+              newBalance: formattedBalance,
+              change: Number(formattedBalance) - Number(wallet.balance)
+            });
 
-          // Notify connected client if exists
-          const client = clients.get(wallet.userId);
-          if (client && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({
-              type: 'BALANCE_UPDATE',
-              walletId: wallet.id,
-              balance: formattedBalance
-            }));
+            await db
+              .update(wallets)
+              .set({ balance: formattedBalance })
+              .where(eq(wallets.id, wallet.id));
+
+            // Notify connected client if exists
+            const client = clients.get(wallet.userId);
+            if (client && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({
+                type: 'BALANCE_UPDATE',
+                walletId: wallet.id,
+                balance: formattedBalance,
+                timestamp: new Date().toISOString()
+              }));
+            }
           }
+        } catch (walletError) {
+          console.error(`Error polling balance for wallet ${wallet.address}:`, walletError);
+          continue; // Continue with next wallet if one fails
         }
       }
     } catch (error) {
-      console.error('Error polling balances:', error);
+      console.error('Error in balance polling service:', error);
+      throw error; // Rethrow for global error handler
     }
   };
 
-  // Start polling every 30 seconds
-  setInterval(pollBalances, 30000);
+  // Start polling every 10 seconds
+  setInterval(pollBalances, 10000);
+
+  // Initial balance poll
+  pollBalances().catch(error => {
+    console.error('Error in initial balance poll:', error);
+  });
 
   // Create new wallet
   app.post("/api/wallets", requireAuth, async (req, res) => {
@@ -401,16 +419,13 @@ export function setupWallet(app: Express) {
         });
       }
 
-      // Add 20% buffer to gas estimate
-      const gasLimit = gasEstimate * BigInt(120) / BigInt(100);
-
-      // Create and sign transaction with existing feeData
+      // Create and sign transaction using the already estimated fees
       const tx = await wallet.sendTransaction({
         to: recipientAddress,
         value: ethers.parseEther(amount.toString()),
-        gasLimit,
-        maxFeePerGas: feeData.maxFeePerGas,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
+        gasLimit: fees.gasLimit,
+        maxFeePerGas: fees.maxFeePerGas,
+        maxPriorityFeePerGas: fees.maxPriorityFeePerGas
       });
 
       // Wait for confirmation with timeout

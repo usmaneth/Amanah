@@ -21,6 +21,13 @@ interface RequestResult {
   ok: boolean;
   message?: string;
   wallet?: WalletResponse;
+  error?: string;
+  details?: {
+    amount: string;
+    estimatedGasFees: string;
+    totalRequired: string;
+    currentBalance: string;
+  };
 }
 
 export function useWallet() {
