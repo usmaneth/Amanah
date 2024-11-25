@@ -217,18 +217,77 @@ export default function CreateWalletForm({ open, onOpenChange }: CreateWalletFor
               </div>
             </div>
             
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                Wallet Address
-              </label>
-              <div className="p-3 bg-muted rounded-lg break-all font-mono text-sm">
-                {walletAddress}
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Wallet Address
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 p-3 bg-muted rounded-lg break-all font-mono text-sm">
+                    {walletAddress}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(walletAddress);
+                      toast({
+                        title: "Address Copied",
+                        description: "Wallet address has been copied to clipboard",
+                      });
+                    }}
+                  >
+                    Copy
+                  </Button>
+                </div>
               </div>
-            </div>
 
-            <Button className="w-full" onClick={handleClose}>
-              Create Account
-            </Button>
+              <div className="space-y-4 rounded-lg border p-4">
+                <div>
+                  <h4 className="font-medium">Fuji Testnet Wallet</h4>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    This is a real blockchain wallet on the Avalanche Fuji Testnet. You can interact with it using other wallets or dApps on the testnet.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-medium mb-2">Network Details</h4>
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Network Name:</dt>
+                      <dd className="font-medium">Avalanche Fuji Testnet</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Chain ID:</dt>
+                      <dd className="font-medium">43113</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">RPC URL:</dt>
+                      <dd className="font-mono text-xs">https://api.avax-test.network/ext/bc/C/rpc</dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <div>
+                  <h4 className="font-medium mb-1">Get Test AVAX</h4>
+                  <p className="text-sm text-muted-foreground">
+                    To get test AVAX for your wallet, visit the{" "}
+                    <a 
+                      href="https://faucet.avax.network"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      Avalanche Faucet
+                    </a>
+                  </p>
+                </div>
+              </div>
+
+              <Button className="w-full" onClick={handleClose}>
+                Done
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>

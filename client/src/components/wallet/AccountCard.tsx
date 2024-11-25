@@ -4,6 +4,7 @@ import { formatCurrency, cn } from "@/lib/utils";
 import { CreditCard, Shield, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 interface AccountCardProps {
   wallet: Wallet;
@@ -32,6 +33,7 @@ const accountTypeConfig = {
 
 export default function AccountCard({ wallet }: AccountCardProps) {
   const [showAddress, setShowAddress] = useState(false);
+  const { toast } = useToast();
   const type = wallet.type as keyof typeof accountTypeConfig;
   const config = accountTypeConfig[type];
   const Icon = config?.icon || CreditCard;
@@ -77,8 +79,34 @@ export default function AccountCard({ wallet }: AccountCardProps) {
           </Button>
           
           {showAddress && (
-            <div className="p-2 bg-muted rounded-lg break-all font-mono text-xs">
-              {wallet.address}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 p-2 bg-muted rounded-lg break-all font-mono text-xs">
+                  {wallet.address}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    navigator.clipboard.writeText(wallet.address);
+                    toast({
+                      title: "Address Copied",
+                      description: "Wallet address has been copied to clipboard",
+                    });
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                <p>This is a Fuji testnet wallet. Add it to MetaMask or other wallets using:</p>
+                <ul className="list-disc list-inside mt-1 space-y-1">
+                  <li>Network: Avalanche Fuji Testnet</li>
+                  <li>Chain ID: 43113</li>
+                  <li>RPC: https://api.avax-test.network/ext/bc/C/rpc</li>
+                </ul>
+              </div>
             </div>
           )}
         </div>
