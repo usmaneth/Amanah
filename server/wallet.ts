@@ -8,7 +8,11 @@ const provider = new ethers.JsonRpcProvider("https://api.avax.network/ext/bc/C/r
 
 export function setupWallet(app: Express) {
   // Middleware to ensure user is authenticated
-  const requireAuth = (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
+  const requireAuth = (
+    req: Express.Request & { user?: Express.User },
+    res: Express.Response,
+    next: Express.NextFunction
+  ) => {
     if (!req.isAuthenticated() || !req.user) {
       return res.status(401).send("Not authenticated");
     }
