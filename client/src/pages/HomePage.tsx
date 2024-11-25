@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import AccountCard from "../components/wallet/AccountCard";
 import SendMoneyForm from "../components/wallet/SendMoneyForm";
 import ZakatCalculator from "../components/wallet/ZakatCalculator";
+import CreateWalletForm from "../components/wallet/CreateWalletForm";
 import { useWallet } from "../hooks/use-wallet";
 import { useUser } from "../hooks/use-user";
 import { Button } from "@/components/ui/button";
