@@ -218,19 +218,9 @@ export function setupWallet(app: Express) {
       return res.status(401).send("User session invalid");
     }
 
-    const { recipientUsername, amount, note } = req.body;
+    const { recipient, amount, note, useAddress } = req.body;
 
     try {
-      // Find recipient
-      const [recipient] = await db.select()
-        .from(users)
-        .where(eq(users.username, recipientUsername))
-        .limit(1);
-
-      if (!recipient) {
-        return res.status(400).send("Recipient not found");
-      }
-
       // Get sender's wallet
       const [senderWallet] = await db.select()
         .from(wallets)
@@ -244,17 +234,41 @@ export function setupWallet(app: Express) {
         return res.status(400).send("Sender wallet not found");
       }
 
-      // Get recipient's wallet
-      const [recipientWallet] = await db.select()
-        .from(wallets)
-        .where(and(
-          eq(wallets.userId, recipient.id),
-          eq(wallets.type, "daily")
-        ))
-        .limit(1);
+      let recipientAddress: string;
+      let recipientUserId: number | null = null;
 
-      if (!recipientWallet) {
-        return res.status(400).send("Recipient wallet not found");
+      if (useAddress) {
+        // Validate the recipient address format
+        if (!ethers.isAddress(recipient)) {
+          return res.status(400).send("Invalid recipient address format");
+        }
+        recipientAddress = recipient;
+      } else {
+        // Find recipient by username
+        const [recipientUser] = await db.select()
+          .from(users)
+          .where(eq(users.username, recipient))
+          .limit(1);
+
+        if (!recipientUser) {
+          return res.status(400).send("Recipient not found");
+        }
+
+        // Get recipient's wallet
+        const [recipientWallet] = await db.select()
+          .from(wallets)
+          .where(and(
+            eq(wallets.userId, recipientUser.id),
+            eq(wallets.type, "daily")
+          ))
+          .limit(1);
+
+        if (!recipientWallet) {
+          return res.status(400).send("Recipient wallet not found");
+        }
+
+        recipientAddress = recipientWallet.address;
+        recipientUserId = recipientUser.id;
       }
 
       // Create wallet instance
@@ -279,13 +293,19 @@ export function setupWallet(app: Express) {
       // Get current gas price
       const gasPrice = await provider.getFeeData();
       
+      // Get current gas price
+      const feeData = await provider.getFeeData();
+      if (!feeData.maxFeePerGas || !feeData.maxPriorityFeePerGas) {
+        return res.status(500).send("Failed to fetch gas prices");
+      }
+
       // Create and sign transaction
       const tx = await wallet.sendTransaction({
-        to: recipientWallet.address,
+        to: recipientAddress,
         value: ethers.parseEther(amount.toString()),
         gasLimit,
-        maxFeePerGas: gasPrice.maxFeePerGas,
-        maxPriorityFeePerGas: gasPrice.maxPriorityFeePerGas
+        maxFeePerGas: feeData.maxFeePerGas,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
       });
 
       // Wait for confirmation with timeout
@@ -294,28 +314,34 @@ export function setupWallet(app: Express) {
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error("Transaction timeout")), 30000)
         )
-      ]) as Awaited<ReturnType<typeof tx.wait>>;
+      ]);
 
-      // Record transaction
+      if (!receipt) {
+        throw new Error("Transaction failed to be confirmed");
+      }
+
+      // Record transaction in database
       await db.insert(transactions)
         .values({
           fromUserId: req.user.id,
-          toUserId: recipient.id,
+          toUserId: recipientUserId || req.user.id, // If sending to address, use sender's ID
           amount: amount.toString(),
           type: "transfer",
           status: "completed",
           metadata: { 
-            note, 
+            note,
             txHash: tx.hash,
             blockNumber: receipt.blockNumber,
-            gasUsed: receipt.gasUsed.toString()
+            gasUsed: receipt.gasUsed.toString(),
+            recipientAddress: useAddress ? recipientAddress : undefined
           }
         });
 
       res.json({ 
         success: true,
         txHash: tx.hash,
-        blockNumber: receipt.blockNumber
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString()
       });
     } catch (error: any) {
       console.error("Transaction error:", error);

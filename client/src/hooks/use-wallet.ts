@@ -2,9 +2,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Wallet, Transaction } from "@db/schema";
 
 interface SendMoneyParams {
-  recipientUsername: string;
+  recipient: string;
   amount: number;
   note?: string;
+  useAddress: boolean;
 }
 
 interface WalletResponse {
