@@ -3,9 +3,39 @@ import { db } from "../db";
 import { wallets, transactions, users } from "@db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { ethers } from "ethers";
+import { WebSocket, WebSocketServer } from 'ws';
 
 const FUJI_RPC_URL = "https://api.avax-test.network/ext/bc/C/rpc";
 let provider: ethers.JsonRpcProvider;
+
+// WebSocket setup
+const wss = new WebSocketServer({ noServer: true });
+const clients = new Map<number, WebSocket>();
+// WebSocket upgrade handling
+export function handleUpgrade(server: any) {
+  server.on('upgrade', (request: any, socket: any, head: any) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  });
+}
+
+// WebSocket connection handling
+wss.on('connection', (ws, request) => {
+  const userId = request.session?.passport?.user;
+  if (userId) {
+    clients.set(userId, ws);
+    
+    ws.on('close', () => {
+      clients.delete(userId);
+    });
+  }
+});
+
+// Type guard for user authentication
+function isAuthenticated(req: Express.Request): req is Express.Request & { user: Express.User } {
+  return req.isAuthenticated() && req.user !== undefined && typeof req.user.id === 'number';
+}
 
 try {
   provider = new ethers.JsonRpcProvider(FUJI_RPC_URL);
@@ -33,23 +63,49 @@ export function setupWallet(app: Express) {
     res: Express.Response,
     next: Express.NextFunction
   ) => {
-    if (!req.isAuthenticated()) {
+    if (!isAuthenticated(req)) {
       return res.status(401).send("Not authenticated");
     }
-
-    // Type guard to ensure user is defined with correct properties
-    if (!req.user || typeof req.user.id !== 'number') {
-      return res.status(401).send("User session invalid");
-    }
-
     next();
   };
 
+  // Balance polling service
+  const pollBalances = async () => {
+    try {
+      const allWallets = await db.select().from(wallets);
+      
+      for (const wallet of allWallets) {
+        const balance = await provider.getBalance(wallet.address);
+        const formattedBalance = ethers.formatEther(balance);
+        
+        // Update database if balance changed
+        if (formattedBalance !== wallet.balance) {
+          await db
+            .update(wallets)
+            .set({ balance: formattedBalance })
+            .where(eq(wallets.id, wallet.id));
+
+          // Notify connected client if exists
+          const client = clients.get(wallet.userId);
+          if (client && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'BALANCE_UPDATE',
+              walletId: wallet.id,
+              balance: formattedBalance
+            }));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error polling balances:', error);
+    }
+  };
+
+  // Start polling every 30 seconds
+  setInterval(pollBalances, 30000);
+
   // Create new wallet
   app.post("/api/wallets", requireAuth, async (req, res) => {
-    if (!req.user?.id) {
-      return res.status(401).send("User session invalid");
-    }
 
     try {
       const { name, type } = req.body;
@@ -218,7 +274,7 @@ export function setupWallet(app: Express) {
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error("Transaction timeout")), 30000)
         )
-      ]);
+      ]) as Awaited<ReturnType<typeof tx.wait>>;
 
       // Record transaction
       await db.insert(transactions)
@@ -258,6 +314,10 @@ export function setupWallet(app: Express) {
 
   // Pay Zakat
   app.post("/api/transactions/zakat", requireAuth, async (req, res) => {
+    if (!isAuthenticated(req)) {
+      return res.status(401).send("Not authenticated");
+    }
+
     const { amount } = req.body;
 
     try {
