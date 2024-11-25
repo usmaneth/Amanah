@@ -321,20 +321,24 @@ export function setupWallet(app: Express) {
       return res.status(401).send("User session invalid");
     }
 
-    const { recipient, amount, note, useAddress } = req.body;
+    const { recipient, amount, note, useAddress, walletId } = req.body;
+
+    if (!walletId) {
+      return res.status(400).send("Wallet ID is required");
+    }
 
     try {
-      // Get sender's wallet
+      // Get sender's wallet using walletId from request
       const [senderWallet] = await db.select()
         .from(wallets)
         .where(and(
           eq(wallets.userId, req.user.id),
-          eq(wallets.type, "daily")
+          eq(wallets.id, walletId)
         ))
         .limit(1);
 
       if (!senderWallet) {
-        return res.status(400).send("Sender wallet not found");
+        return res.status(400).send("Selected wallet not found");
       }
 
       let recipientAddress: string;
@@ -380,23 +384,50 @@ export function setupWallet(app: Express) {
       // Try to get test AVAX if balance is low
       await requestTestAVAX(senderWallet.address);
 
-      // Get current balance after potential faucet drip
-      const balance = await provider.getBalance(senderWallet.address);
-      
-      // Estimate transaction fees
+      // Get current balance and nonce
+      const [balance, nonce] = await Promise.all([
+        provider.getBalance(senderWallet.address),
+        provider.getTransactionCount(senderWallet.address)
+      ]);
+
+      // Retry gas estimation with increasing buffer
       let fees;
-      try {
-        fees = await estimateTransactionFees(
-          senderWallet.address,
-          recipientAddress,
-          amount.toString()
-        );
-      } catch (error: any) {
-        return res.status(400).send(
-          error.message.includes("insufficient funds") 
-            ? "Insufficient funds to estimate gas. Please ensure your wallet has some AVAX for fees."
-            : "Failed to estimate transaction fees. Please try again."
-        );
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          console.log(`Attempting gas estimation (attempt ${attempt}/3) for transaction:`, {
+            from: senderWallet.address,
+            to: recipientAddress,
+            amount: amount.toString(),
+            currentBalance: ethers.formatEther(balance)
+          });
+
+          fees = await estimateTransactionFees(
+            senderWallet.address,
+            recipientAddress,
+            amount.toString()
+          );
+          console.log("Gas estimation successful:", {
+            gasLimit: fees.gasLimit.toString(),
+            maxFeePerGas: ethers.formatUnits(fees.maxFeePerGas, "gwei"),
+            maxPriorityFeePerGas: ethers.formatUnits(fees.maxPriorityFeePerGas, "gwei"),
+            totalFees: ethers.formatEther(fees.totalFees)
+          });
+          break;
+        } catch (error: any) {
+          console.error(`Gas estimation attempt ${attempt} failed:`, error);
+          
+          if (attempt === 3) {
+            console.error("Gas estimation failed after 3 attempts:", error);
+            return res.status(400).send(
+              error.message.includes("insufficient funds")
+                ? "Insufficient funds for gas estimation. Please ensure your wallet has enough AVAX for network fees."
+                : "Failed to estimate transaction fees. Please try again."
+            );
+          }
+          
+          // Wait with exponential backoff before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
       }
 
       // Calculate total required amount including gas fees
@@ -419,13 +450,22 @@ export function setupWallet(app: Express) {
         });
       }
 
-      // Create and sign transaction using the already estimated fees
+      // Create and sign transaction with proper nonce and gas settings
       const tx = await wallet.sendTransaction({
         to: recipientAddress,
         value: ethers.parseEther(amount.toString()),
         gasLimit: fees.gasLimit,
         maxFeePerGas: fees.maxFeePerGas,
-        maxPriorityFeePerGas: fees.maxPriorityFeePerGas
+        maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+        nonce: nonce
+      });
+
+      console.log("Transaction sent:", {
+        hash: tx.hash,
+        nonce,
+        gasLimit: tx.gasLimit.toString(),
+        maxFeePerGas: ethers.formatUnits(tx.maxFeePerGas || 0, "gwei"),
+        maxPriorityFeePerGas: ethers.formatUnits(tx.maxPriorityFeePerGas || 0, "gwei")
       });
 
       // Wait for confirmation with timeout
