@@ -29,16 +29,16 @@ async function requestTestAVAX(address: string): Promise<boolean> {
 export function setupWallet(app: Express) {
   // Middleware to ensure user is authenticated
   const requireAuth = (
-    req: Express.Request & { user?: Express.User },
+    req: Express.Request,
     res: Express.Response,
-    next: Function
+    next: Express.NextFunction
   ) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
     }
 
-    // Type guard to ensure user is defined
-    if (!req.user || typeof req.user.id === 'undefined') {
+    // Type guard to ensure user is defined with correct properties
+    if (!req.user || typeof req.user.id !== 'number') {
       return res.status(401).send("User session invalid");
     }
 
@@ -54,8 +54,8 @@ export function setupWallet(app: Express) {
     try {
       const { name, type } = req.body;
 
-      if (!name || !type || !["daily", "family", "zakat"].includes(type)) {
-        return res.status(400).send("Invalid wallet configuration");
+      if (!name || !type || !["personal", "emergency", "investments"].includes(type)) {
+        return res.status(400).send("Invalid wallet type. Must be one of: personal, emergency, investments");
       }
 
       // Create new Fuji testnet wallet

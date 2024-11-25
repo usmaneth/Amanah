@@ -7,9 +7,18 @@ interface SendMoneyParams {
   note?: string;
 }
 
+interface WalletResponse {
+  id: number;
+  address: string;
+  name: string;
+  type: string;
+  balance: string;
+}
+
 interface RequestResult {
   ok: boolean;
   message?: string;
+  wallet?: WalletResponse;
 }
 
 export function useWallet() {
