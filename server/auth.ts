@@ -120,15 +120,31 @@ export function setupAuth(app: Express) {
 
       const { username, password, email, phone, fullName, country } = result.data;
 
-      // Check if user exists
-      const [existingUser] = await db
+      // Check if username or email already exists
+      const [existingUsername] = await db
         .select()
         .from(users)
         .where(eq(users.username, username))
         .limit(1);
 
-      if (existingUser) {
-        return res.status(400).send("Username already exists");
+      if (existingUsername) {
+        return res.status(409).json({
+          ok: false,
+          message: "Username already exists"
+        });
+      }
+
+      const [existingEmail] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+
+      if (existingEmail) {
+        return res.status(409).json({
+          ok: false,
+          message: "Email already registered"
+        });
       }
 
       // Create wallet for user
@@ -171,8 +187,35 @@ export function setupAuth(app: Express) {
           },
         });
       });
-    } catch (error) {
-      next(error);
+    } catch (error: any) {
+      // Handle database unique constraint violations
+      if (error.code === '23505') { // PostgreSQL unique violation code
+        if (error.constraint === 'users_email_unique') {
+          return res.status(409).json({
+            ok: false,
+            message: "Email already registered"
+          });
+        }
+        if (error.constraint === 'users_username_unique') {
+          return res.status(409).json({
+            ok: false,
+            message: "Username already exists"
+          });
+        }
+        if (error.constraint === 'users_phone_unique') {
+          return res.status(409).json({
+            ok: false,
+            message: "Phone number already registered"
+          });
+        }
+      }
+      
+      // Log the error for debugging but don't expose internal details
+      console.error('Registration error:', error);
+      return res.status(500).json({
+        ok: false,
+        message: "An error occurred during registration"
+      });
     }
   });
 

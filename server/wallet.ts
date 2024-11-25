@@ -11,11 +11,17 @@ export function setupWallet(app: Express) {
   const requireAuth = (
     req: Express.Request & { user?: Express.User },
     res: Express.Response,
-    next: Express.NextFunction
+    next: Function
   ) => {
-    if (!req.isAuthenticated() || !req.user) {
+    if (!req.isAuthenticated()) {
       return res.status(401).send("Not authenticated");
     }
+
+    // Type guard to ensure user is defined
+    if (!req.user || typeof req.user.id === 'undefined') {
+      return res.status(401).send("User session invalid");
+    }
+
     next();
   };
 
