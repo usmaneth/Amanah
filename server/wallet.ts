@@ -24,20 +24,49 @@ updateAvaxPrice();
 const FUJI_RPC_URL = "https://api.avax-test.network/ext/bc/C/rpc";
 let provider: ethers.JsonRpcProvider;
 
+// Type definitions
+interface ExtendedRequest extends Express.Request {
+  session: {
+    passport?: {
+      user?: number;
+    };
+  } & Express.Request['session'];
+}
+
+interface TransactionReceipt {
+  blockNumber: number;
+  gasUsed: bigint;
+  status: number;
+}
+
+interface CustomTransactionReceipt {
+  blockNumber: number;
+  gasUsed: bigint;
+  status: number;
+  hash: string;
+}
+
 // WebSocket setup
 const wss = new WebSocketServer({ noServer: true });
 const clients = new Map<number, WebSocket>();
+
 // WebSocket upgrade handling
 export function handleUpgrade(server: any) {
   server.on('upgrade', (request: any, socket: any, head: any) => {
+    const extendedRequest = request as ExtendedRequest;
+    if (!extendedRequest.session?.passport?.user) {
+      socket.destroy();
+      return;
+    }
+    
     wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
+      wss.emit('connection', ws, extendedRequest);
     });
   });
 }
 
 // WebSocket connection handling
-wss.on('connection', (ws, request) => {
+wss.on('connection', (ws, request: ExtendedRequest) => {
   const userId = request.session?.passport?.user;
   if (userId) {
     clients.set(userId, ws);
@@ -172,6 +201,10 @@ export function setupWallet(app: Express) {
 
   // Get user's wallets
   app.get("/api/wallets", requireAuth, async (req, res) => {
+    if (!req.user?.id) {
+      return res.status(401).send("User session invalid");
+    }
+
     try {
       const userWallets = await db.select()
         .from(wallets)
@@ -276,30 +309,31 @@ export function setupWallet(app: Express) {
       
       // Get current balance
       const balance = await provider.getBalance(senderWallet.address);
-      if (balance < ethers.parseEther(amount.toString())) {
-        return res.status(400).send("Insufficient funds");
+      
+      // Get current gas price and estimate gas
+      const feeData = await provider.getFeeData();
+      if (!feeData.maxFeePerGas) {
+        return res.status(500).send("Failed to fetch gas prices");
       }
 
       // Estimate gas
       const gasEstimate = await provider.estimateGas({
         from: senderWallet.address,
-        to: recipientWallet.address,
+        to: recipientAddress,
         value: ethers.parseEther(amount.toString())
       });
+
+      // Calculate total required amount including gas fees
+      const totalRequired = ethers.parseEther(amount.toString()) + (gasEstimate * feeData.maxFeePerGas);
+      if (balance < totalRequired) {
+        const gasFeesInEther = ethers.formatEther(gasEstimate * feeData.maxFeePerGas);
+        return res.status(400).send(`Insufficient funds. Transaction requires ${amount} AVAX plus approximately ${gasFeesInEther} AVAX for gas fees`);
+      }
 
       // Add 20% buffer to gas estimate
       const gasLimit = gasEstimate * BigInt(120) / BigInt(100);
 
-      // Get current gas price
-      const gasPrice = await provider.getFeeData();
-      
-      // Get current gas price
-      const feeData = await provider.getFeeData();
-      if (!feeData.maxFeePerGas || !feeData.maxPriorityFeePerGas) {
-        return res.status(500).send("Failed to fetch gas prices");
-      }
-
-      // Create and sign transaction
+      // Create and sign transaction with existing feeData
       const tx = await wallet.sendTransaction({
         to: recipientAddress,
         value: ethers.parseEther(amount.toString()),
