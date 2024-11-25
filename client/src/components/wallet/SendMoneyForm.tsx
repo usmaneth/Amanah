@@ -13,6 +13,9 @@ import { Loader2 } from "lucide-react";
 import { z } from "zod";
 
 const sendMoneySchema = z.object({
+  walletId: z.number({
+    required_error: "Please select a wallet"
+  }),
   recipient: z.string().min(1, "Recipient is required"),
   amount: z.string().min(1, "Amount is required"),
   note: z.string().optional(),
@@ -97,14 +100,25 @@ function ConfirmationDialog({ open, onClose, onConfirm, data, isLoading }: Confi
 }
 
 export default function SendMoneyForm() {
-  const { sendMoney } = useWallet();
+  const { sendMoney, wallets } = useWallet();
   const { toast } = useToast();
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [usdAmount, setUsdAmount] = useState<number>(0);
+  
+  // Calculate USD value whenever amount changes
+  const updateUsdAmount = (avaxAmount: string) => {
+    const selectedWallet = wallets?.find(w => w.id === form.getValues("walletId"));
+    if (selectedWallet && selectedWallet.usdBalance) {
+      const rate = Number(selectedWallet.usdBalance) / Number(selectedWallet.balance);
+      setUsdAmount(Number(avaxAmount) * rate);
+    }
+  };
 
   const form = useForm<SendMoneyForm>({
     resolver: zodResolver(sendMoneySchema),
     defaultValues: {
+      walletId: undefined,
       recipient: "",
       amount: "",
       note: "",
@@ -112,10 +126,38 @@ export default function SendMoneyForm() {
     },
   });
 
+  // Watch for amount changes to update USD value
+  const amount = form.watch("amount");
+  const selectedWalletId = form.watch("walletId");
+  
+  useEffect(() => {
+    updateUsdAmount(amount);
+  }, [amount, selectedWalletId]);
+
+  const selectedWallet = wallets?.find(w => w.id === selectedWalletId);
+  
+  // Validate balance before submission
+  const validateBalance = () => {
+    if (!selectedWallet) return false;
+    const amountToSend = Number(form.getValues("amount"));
+    const currentBalance = Number(selectedWallet.balance);
+    return amountToSend <= currentBalance;
+  };
+
   const handleSendMoney = async (data: SendMoneyForm) => {
+    if (!validateBalance()) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Insufficient balance for this transaction",
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
       const result = await sendMoney({
+        walletId: data.walletId,
         recipient: data.recipient,
         amount: parseFloat(data.amount),
         note: data.note,
@@ -157,6 +199,38 @@ export default function SendMoneyForm() {
     <>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <FormField
+            control={form.control}
+            name="walletId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Select Wallet</FormLabel>
+                <Select
+                  value={field.value?.toString()}
+                  onValueChange={(value) => field.onChange(Number(value))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a wallet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {wallets?.map((wallet) => (
+                      <SelectItem key={wallet.id} value={wallet.id.toString()}>
+                        {wallet.name} ({formatCurrency(Number(wallet.balance), 'AVAX')})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+                {selectedWallet && (
+                  <p className="text-sm text-muted-foreground">
+                    Available: {formatCurrency(Number(selectedWallet.balance), 'AVAX')}
+                    {" ≈ "}{formatCurrency(Number(selectedWallet.usdBalance || 0))}
+                  </p>
+                )}
+              </FormItem>
+            )}
+          />
+          
           <div className="flex items-center justify-between mb-2">
             <FormLabel>Send using:</FormLabel>
             <Toggle
@@ -203,11 +277,25 @@ export default function SendMoneyForm() {
                       type="number" 
                       step="0.0001" 
                       min="0" 
-                      placeholder="0.0000" 
+                      placeholder="0.0000"
+                      onChange={(e) => {
+                        field.onChange(e);
+                        updateUsdAmount(e.target.value);
+                      }}
                     />
                     <div className="absolute right-3 top-2.5 text-sm text-muted-foreground">
                       AVAX
                     </div>
+                    {amount && (
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        ≈ {formatCurrency(usdAmount)}
+                      </div>
+                    )}
+                    {amount && selectedWallet && Number(amount) > Number(selectedWallet.balance) && (
+                      <p className="text-sm text-destructive mt-1">
+                        Insufficient balance
+                      </p>
+                    )}
                   </div>
                 </FormControl>
                 <FormMessage />

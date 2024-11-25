@@ -311,14 +311,21 @@ export function setupWallet(app: Express) {
       // Wait for confirmation with timeout
       const receipt = await Promise.race([
         tx.wait(2), // Wait for 2 confirmations
-        new Promise((_, reject) => 
+        new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error("Transaction timeout")), 30000)
         )
-      ]);
+      ]) as TransactionReceipt;
 
-      if (!receipt) {
+      if (!receipt || receipt.status === 0) {
         throw new Error("Transaction failed to be confirmed");
       }
+
+      const customReceipt: CustomTransactionReceipt = {
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed,
+        status: receipt.status,
+        hash: tx.hash
+      };
 
       // Record transaction in database
       await db.insert(transactions)
