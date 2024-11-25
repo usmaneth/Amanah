@@ -40,7 +40,7 @@ export function useWallet() {
   // Setup WebSocket connection
   useEffect(() => {
     if (!webSocket) {
-      webSocket = new ReconnectingWebSocket(`ws://${window.location.host}/ws`);
+      webSocket = new ReconnectingWebSocket(`wss://${window.location.host}/ws`);
       
       webSocket.onmessage = (event) => {
         const data = JSON.parse(event.data);
