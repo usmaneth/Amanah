@@ -28,8 +28,9 @@ export default function AccountPage() {
     return <div>Wallet not found</div>;
   }
 
-  const walletTransactions = transactions?.filter(
-    t => t.metadata?.fromAddress === wallet.address || t.metadata?.toAddress === wallet.address
+  const walletTransactions = transactions?.filter(tx => 
+    tx.metadata?.fromAddress?.toLowerCase() === wallet.address.toLowerCase() || 
+    tx.metadata?.toAddress?.toLowerCase() === wallet.address.toLowerCase()
   );
 
   return (
@@ -129,6 +130,12 @@ export default function AccountPage() {
 
       <Dialog open={sendMoneyOpen} onOpenChange={setSendMoneyOpen}>
         <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send Money</DialogTitle>
+            <DialogDescription>
+              Send AVAX to another wallet or user
+            </DialogDescription>
+          </DialogHeader>
           <SendMoneyForm selectedWalletId={wallet.id} />
         </DialogContent>
       </Dialog>

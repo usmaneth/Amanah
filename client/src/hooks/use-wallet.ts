@@ -55,6 +55,10 @@ export function useWallet() {
             );
           });
         }
+
+        if (data.type === 'TRANSACTION_UPDATE') {
+          queryClient.invalidateQueries(['transactions']);
+        }
       };
     }
 
