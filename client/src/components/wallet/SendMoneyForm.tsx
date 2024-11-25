@@ -146,6 +146,14 @@ export default function SendMoneyForm() {
     return amountToSend <= currentBalance;
   };
 
+  const [estimatedGasFees, setEstimatedGasFees] = useState<string | null>(null);
+  const [insufficientFundsDetails, setInsufficientFundsDetails] = useState<{
+    amount: string;
+    estimatedGasFees: string;
+    totalRequired: string;
+    currentBalance: string;
+  } | null>(null);
+
   const handleSendMoney = async (data: SendMoneyForm) => {
     if (!validateBalance()) {
       toast({
@@ -173,12 +181,24 @@ export default function SendMoneyForm() {
         });
         form.reset();
         setShowConfirmation(false);
+        setEstimatedGasFees(null);
+        setInsufficientFundsDetails(null);
       } else {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: result.message,
-        });
+        // Handle detailed insufficient funds error
+        if (result.error === "INSUFFICIENT_FUNDS" && result.details) {
+          setInsufficientFundsDetails(result.details);
+          toast({
+            variant: "destructive",
+            title: "Insufficient Funds",
+            description: `You need ${result.details.totalRequired} AVAX but only have ${result.details.currentBalance} AVAX available. This includes ${result.details.estimatedGasFees} AVAX for network fees.`,
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: result.message,
+          });
+        }
       }
     } catch (error: any) {
       toast({
@@ -293,10 +313,27 @@ export default function SendMoneyForm() {
                         ≈ {formatCurrency(usdAmount)}
                       </div>
                     )}
-                    {amount && selectedWallet && Number(amount) > Number(selectedWallet.balance) && (
-                      <p className="text-sm text-destructive mt-1">
-                        Insufficient balance
-                      </p>
+                    {amount && selectedWallet && (
+                      <div className="space-y-1 mt-1">
+                        {insufficientFundsDetails && (
+                          <>
+                            <p className="text-sm text-destructive">
+                              Insufficient balance for transaction and gas fees
+                            </p>
+                            <div className="text-xs text-muted-foreground space-y-0.5">
+                              <p>Amount: {formatCurrency(Number(insufficientFundsDetails.amount), 'AVAX')}</p>
+                              <p>Estimated Gas Fees: {formatCurrency(Number(insufficientFundsDetails.estimatedGasFees), 'AVAX')}</p>
+                              <p>Total Required: {formatCurrency(Number(insufficientFundsDetails.totalRequired), 'AVAX')}</p>
+                              <p>Current Balance: {formatCurrency(Number(insufficientFundsDetails.currentBalance), 'AVAX')}</p>
+                            </div>
+                          </>
+                        )}
+                        {Number(amount) > Number(selectedWallet.balance) && !insufficientFundsDetails && (
+                          <p className="text-sm text-destructive">
+                            Insufficient balance
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 </FormControl>

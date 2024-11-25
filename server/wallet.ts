@@ -92,13 +92,65 @@ try {
 // Function to request test AVAX from faucet
 async function requestTestAVAX(address: string): Promise<boolean> {
   try {
-    // Note: This is a placeholder. In production, implement actual faucet API call
-    console.log(`Requesting test AVAX for address: ${address}`);
-    return true;
+    // Check current balance
+    const balance = await provider.getBalance(address);
+    const balanceInAvax = Number(ethers.formatEther(balance));
+    
+    // Only request if balance is below 0.1 AVAX
+    if (balanceInAvax < 0.1) {
+      console.log(`Low balance (${balanceInAvax} AVAX) detected for ${address}, requesting from faucet...`);
+      
+      // Make request to Avalanche Fuji Testnet Faucet
+      const response = await axios.post('https://faucet.avax-test.network/api/v1/drip', {
+        address,
+        chain: 'fuji'
+      });
+      
+      if (response.status === 200) {
+        console.log(`Successfully requested test AVAX for ${address}`);
+        return true;
+      }
+    }
+    
+    return false;
   } catch (error) {
     console.error("Failed to request test AVAX:", error);
     return false;
   }
+}
+
+// Function to estimate transaction fees
+async function estimateTransactionFees(from: string, to: string, amount: string): Promise<{
+  gasLimit: bigint;
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  totalFees: bigint;
+}> {
+  // Get current gas price and fee data
+  const feeData = await provider.getFeeData();
+  if (!feeData.maxFeePerGas || !feeData.maxPriorityFeePerGas) {
+    throw new Error("Failed to fetch gas prices");
+  }
+
+  // Estimate gas
+  const gasEstimate = await provider.estimateGas({
+    from,
+    to,
+    value: ethers.parseEther(amount)
+  });
+
+  // Add 20% buffer to gas estimate
+  const gasLimit = gasEstimate * BigInt(120) / BigInt(100);
+  
+  // Calculate total fees
+  const totalFees = gasLimit * feeData.maxFeePerGas;
+
+  return {
+    gasLimit,
+    maxFeePerGas: feeData.maxFeePerGas,
+    maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+    totalFees
+  };
 }
 
 export function setupWallet(app: Express) {
@@ -307,27 +359,46 @@ export function setupWallet(app: Express) {
       // Create wallet instance
       const wallet = new ethers.Wallet(senderWallet.privateKey, provider);
       
-      // Get current balance
+      // Try to get test AVAX if balance is low
+      await requestTestAVAX(senderWallet.address);
+
+      // Get current balance after potential faucet drip
       const balance = await provider.getBalance(senderWallet.address);
       
-      // Get current gas price and estimate gas
-      const feeData = await provider.getFeeData();
-      if (!feeData.maxFeePerGas) {
-        return res.status(500).send("Failed to fetch gas prices");
+      // Estimate transaction fees
+      let fees;
+      try {
+        fees = await estimateTransactionFees(
+          senderWallet.address,
+          recipientAddress,
+          amount.toString()
+        );
+      } catch (error: any) {
+        return res.status(400).send(
+          error.message.includes("insufficient funds") 
+            ? "Insufficient funds to estimate gas. Please ensure your wallet has some AVAX for fees."
+            : "Failed to estimate transaction fees. Please try again."
+        );
       }
 
-      // Estimate gas
-      const gasEstimate = await provider.estimateGas({
-        from: senderWallet.address,
-        to: recipientAddress,
-        value: ethers.parseEther(amount.toString())
-      });
-
       // Calculate total required amount including gas fees
-      const totalRequired = ethers.parseEther(amount.toString()) + (gasEstimate * feeData.maxFeePerGas);
+      const totalRequired = ethers.parseEther(amount.toString()) + fees.totalFees;
       if (balance < totalRequired) {
-        const gasFeesInEther = ethers.formatEther(gasEstimate * feeData.maxFeePerGas);
-        return res.status(400).send(`Insufficient funds. Transaction requires ${amount} AVAX plus approximately ${gasFeesInEther} AVAX for gas fees`);
+        const amountInAvax = amount.toString();
+        const gasFeesInAvax = ethers.formatEther(fees.totalFees);
+        const totalRequiredInAvax = ethers.formatEther(totalRequired);
+        const balanceInAvax = ethers.formatEther(balance);
+        
+        return res.status(400).json({
+          error: "INSUFFICIENT_FUNDS",
+          message: "Insufficient funds for transaction",
+          details: {
+            amount: amountInAvax,
+            estimatedGasFees: gasFeesInAvax,
+            totalRequired: totalRequiredInAvax,
+            currentBalance: balanceInAvax
+          }
+        });
       }
 
       // Add 20% buffer to gas estimate
