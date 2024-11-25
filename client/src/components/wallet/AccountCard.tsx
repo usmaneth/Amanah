@@ -34,12 +34,19 @@ const accountTypeConfig = {
 export default function AccountCard({ wallet }: AccountCardProps) {
   const [showAddress, setShowAddress] = useState(false);
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const type = wallet.type as keyof typeof accountTypeConfig;
   const config = accountTypeConfig[type];
   const Icon = config?.icon || CreditCard;
 
   return (
-    <Card className={cn("overflow-hidden", config?.className)}>
+    <Card 
+      className={cn(
+        "overflow-hidden cursor-pointer transition-shadow hover:shadow-lg", 
+        config?.className
+      )}
+      onClick={() => setLocation(`/accounts/${wallet.id}`)}
+    >
       <CardHeader>
         <CardTitle className="flex items-center gap-3">
           <div className={cn("p-2 rounded-full", config?.className)}>
